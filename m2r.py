@@ -42,7 +42,14 @@ parser.add_argument('--anonymous-references', action='store_true',
 parser.add_argument('--disable-inline-math', action='store_true',
                     default=False,
                     help='disable parsing inline math')
-
+parser.add_argument(
+    "--headings",
+    default="",
+    help=(
+        "comma separated list of heading characters. Must include 6 characters. "
+        "Include the character twice for overline, e.g. '##,**,=,-,^,\"'"
+        )
+    )
 
 def parse_options():
     parser.parse_known_args(namespace=options)
@@ -198,6 +205,7 @@ class RestRenderer(mistune.Renderer):
     def __init__(self, *args, **kwargs):
         self.parse_relative_links = kwargs.pop('parse_relative_links', False)
         self.anonymous_references = kwargs.pop('anonymous_references', False)
+        self.headings = kwargs.pop("headings", False)
         super(RestRenderer, self).__init__(*args, **kwargs)
         if not _is_sphinx:
             parse_options()
@@ -205,6 +213,31 @@ class RestRenderer(mistune.Renderer):
                 self.parse_relative_links = options.parse_relative_links
             if getattr(options, 'anonymous_references', False):
                 self.anonymous_references = options.anonymous_references
+            if getattr(options, "headings", False):
+                self.headings = options.headings
+
+        if self.headings:
+            # override hmarks
+            headings = self.headings.split(",")
+
+            # Validation. TODO: Improve clunky code.
+            if len(headings) != 6:
+                raise ValueError("headings must be a comma separated list of 6 "
+                                 "characters (e.g. =,-,^,~,\",#)")
+            for heading in headings:
+                if len(heading) not in (1,2):
+                    raise ValueError(
+                        f"Heading '{heading}' is invalid. Each heading should be either"
+                        " a single character or a double  character (but the same "
+                        "character repeated twice)"
+                    )
+                if len(heading) == 2 and heading[0] != heading[1]:
+                    raise ValueError(
+                        f"Heading '{heading}' is invalid. Each heading should be either"
+                        " a single character or a double  character (but the same "
+                        "character repeated twice)"
+                    )
+            self.hmarks = {idx+1: mark for idx, mark in enumerate(self.headings.split(","))}
 
     def _indent_block(self, block):
         return '\n'.join(self.indent + line if line else ''
@@ -243,8 +276,13 @@ class RestRenderer(mistune.Renderer):
         :param level: a number for the header level, for example: 1.
         :param raw: raw text content of the header.
         """
-        return '\n{0}\n{1}\n'.format(text,
-                                     self.hmarks[level] * column_width(text))
+        header_line = self.hmarks[level][0] * column_width(text)
+        include_overline = len(self.hmarks[level]) == 2
+        return '{0}\n{1}\n{2}\n'.format(
+            f"\n{header_line}" if include_overline else "",
+            text,
+            header_line,
+        )
 
     def hrule(self):
         """Rendering method for ``<hr>`` tag."""
@@ -551,7 +589,8 @@ class M2RParser(rst.Parser, object):
             no_underscore_emphasis=config.no_underscore_emphasis,
             parse_relative_links=config.m2r_parse_relative_links,
             anonymous_references=config.m2r_anonymous_references,
-            disable_inline_math=config.m2r_disable_inline_math
+            disable_inline_math=config.m2r_disable_inline_math,
+            headings=config.headings,
         )
         super(M2RParser, self).parse(converter(inputstring), document)
 
@@ -624,7 +663,8 @@ class MdInclude(rst.Directive):
             no_underscore_emphasis=config.no_underscore_emphasis,
             parse_relative_links=config.m2r_parse_relative_links,
             anonymous_references=config.m2r_anonymous_references,
-            disable_inline_math=config.m2r_disable_inline_math
+            disable_inline_math=config.m2r_disable_inline_math,
+            headings=config.headings,
         )
         include_lines = statemachine.string2lines(converter(rawtext),
                                                   tab_width,
